@@ -1,5 +1,5 @@
 import logging
-
+import sys
 
 # CustomFormatter class with ANSI color codes for log levels
 class CustomFormatter(logging.Formatter):
@@ -42,15 +42,17 @@ def get_logger_obj(app_name, log_level=logging.INFO):
     logger = logging.getLogger(app_name)
     logger.setLevel(log_level)
 
-    # Create a console handler with a higher log level
-    ch = logging.StreamHandler()
-    ch.setLevel(log_level)
+    # Check if the logger already has handlers to avoid duplicate log messages
+    if not logger.handlers:
+        # Create a console handler with a higher log level
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setLevel(log_level)
 
-    # Set the custom formatter for the console handler
-    ch.setFormatter(CustomFormatter())
+        # Set the custom formatter for the console handler
+        ch.setFormatter(CustomFormatter())
 
-    # Add the console handler to the logger
-    logger.addHandler(ch)
+        # Add the console handler to the logger
+        logger.addHandler(ch)
 
     return logger
 

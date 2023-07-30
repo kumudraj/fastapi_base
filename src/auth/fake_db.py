@@ -1,6 +1,3 @@
-
-
-
 # User database (in-memory for demonstration purposes)
 db = {
     "tim": {

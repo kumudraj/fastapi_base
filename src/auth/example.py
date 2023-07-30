@@ -1,6 +1,6 @@
 from fastapi.security import OAuth2PasswordRequestForm
 
-from main import login_for_access_token
+from src.endpoint.routes import login_for_access_token
 
 
 # Example function uses

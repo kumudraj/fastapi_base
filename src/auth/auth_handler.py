@@ -22,108 +22,73 @@ oauth_2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # Define a function to verify a plain password against a hashed password
 def verify_password(plain_password, hashed_password) -> bool:
-    """
-    Verify the given plain password against the given hashed password.
-
-    Parameters:
-    plain_password (str): The plain password to verify.
-    hashed_password (str): The hashed password to compare against.
-
-    Returns:
-    bool: True if the plain password matches the hashed password, False otherwise.
-    """
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception as e:
+        log.error(f"Error occurred while verifying password: {e}")
+        return False
 
 
 # Define a function to get the hash of a password
 def get_password_hash(password) -> str:
-    """
-    Get the hashed version of the provided password.
-
-    Parameters:
-    password (str): The password to hash.
-
-    Returns:
-    str: The hashed password.
-    """
-    return pwd_context.hash(password)
+    try:
+        return pwd_context.hash(password)
+    except Exception as e:
+        log.error(f"Error occurred while hashing password: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Password hashing error")
 
 
 # Define a function to get a user from the database based on their username
 def get_user(db, username: str):
-    """
-    Get a user from the database based on their username.
-
-    Parameters:
-    db (dict): The database containing user data.
-    username (str): The username of the user to retrieve.
-
-    Returns:
-    UserInDB or None: The user data if found, None if the user does not exist in the database.
-    """
-    if username in db:
-        user_data = db[username]
-        return UserInDB(**user_data)
+    try:
+        if username in db:
+            user_data = db[username]
+            return UserInDB(**user_data)
+    except Exception as e:
+        log.error(f"Error occurred while fetching user from database: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
 
 
 # Define a function to authenticate a user based on their credentials
 def authenticate_user(db, username: str, password: str):
-    """
-    Authenticate a user based on their credentials.
+    try:
+        log.info(f"Authenticating: {username}")
+        user = get_user(db, username)
+        if not user:
+            log.warning(f"{username} is not a valid user")
+            return False
 
-    Parameters:
-    db (dict): The database containing user data.
-    username (str): The username of the user to authenticate.
-    password (str): The plain password to verify.
+        if not verify_password(password, user.hashed_password):
+            log.warning(f"Invalid password for user: {username}")
+            return False
 
-    Returns:
-    UserInDB or False: The user data if authentication succeeds, False if the user does not exist in the database.
-    """
-    log.info(f"Authenticating: {username}")
-    user = get_user(db, username)
-    if not user:
-        log.warning(f"{username} is not a valid user")
-        return False
-    return user
+        return user
+
+    except Exception as e:
+        log.error(f"Error occurred while authenticating user: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Authentication error")
 
 
 # Define a function to create an access token with optional expiration
 def create_access_token(data: dict, expires_delta: timedelta or None = None) -> str:
-    """
-    Create an access token with optional expiration.
+    try:
+        to_encode = data.copy()
+        if expires_delta:
+            expire = datetime.utcnow() + expires_delta
+        else:
+            expire = datetime.utcnow() + timedelta(minutes=15)
 
-    Parameters:
-    data (dict): The data to include in the access token.
-    expires_delta (timedelta or None, optional): The optional time delta for token expiration. If None, the token will expire in 15 minutes.
+        to_encode.update({"exp": expire})
+        encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+        return encoded_jwt
 
-    Returns:
-    str: The encoded access token.
-    """
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    except Exception as e:
+        log.error(f"Error occurred while creating access token: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Token creation error")
 
 
 # Define an asynchronous function to get the current user from a provided token
 async def get_current_user(token: str = Depends(oauth_2_scheme)):
-    """
-    Get the current user based on the provided token.
-
-    Parameters:
-    token (str, optional): The JWT token for authentication. Obtained from the "Authorization" header in the request.
-
-    Returns:
-    UserInDB: The current user if authentication is successful.
-
-    Raises:
-    HTTPException: If the provided token is invalid or the user is not found in the database.
-    """
     credentials_exception = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                                           detail="Could not validate credentials",
                                           headers={"WWW-Authenticate": "Bearer"})
@@ -134,29 +99,32 @@ async def get_current_user(token: str = Depends(oauth_2_scheme)):
             raise credentials_exception
         token_data = TokenData(username=username)
 
-    except JWTError:
+    except JWTError as e:
+        log.error(f"Error occurred while decoding JWT: {e}")
         raise credentials_exception
-    user = get_user(db, username=token_data.username)
 
-    if user is None:
-        raise credentials_exception
-    return user
+    try:
+        user = get_user(db, username=token_data.username)
+
+        if user is None:
+            log.warning(f"User not found in the database: {token_data.username}")
+            raise credentials_exception
+
+        return user
+
+    except Exception as e:
+        log.error(f"Error occurred while fetching user from database: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
 
 
 # Define an asynchronous function to get the current active user based on the provided current_user dependency
 async def get_current_active_user(current_user: UserInDB = Depends(get_current_user)):
-    """
-    Get the current active user based on the provided current_user dependency.
+    try:
+        if current_user.disabled:
+            log.warning(f"Inactive user: {current_user.username}")
+            raise HTTPException(status_code=400, detail="Inactive user")
+        return current_user
 
-    Parameters:
-    current_user (UserInDB): The user obtained from the get_current_user function.
-
-    Returns:
-    UserInDB: The current active user if they are not disabled.
-
-    Raises:
-    HTTPException: If the current user is disabled.
-    """
-    if current_user.disabled:
-        raise HTTPException(status_code=400, detail="Inactive user")
-    return current_user
+    except Exception as e:
+        log.error(f"Error occurred while fetching current active user: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
