@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]==0.17.0
+python-multipart==0.0.6
+python-jose[cryptography]
+passlib[bcrypt]
+fastapi-healthcheck==0.2.8
